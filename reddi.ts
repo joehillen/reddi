@@ -88,17 +88,17 @@ export class Reddit {
       };
 
       if (!this.config.refreshToken || !this.config.accessToken) {
-        await this.newToken();
+        await this.newAuthorization();
       }
 
       return this;
     })();
   }
 
-  async oauthServer(): Promise<string> {
-    console.log(`HTTP webserver running on port ${this.config.port}`);
-    console.log(
-      `\nGo here to generate an access token:\nhttps://www.reddit.com/api/v1/authorize?client_id=${
+  private async oauthServer(): Promise<string> {
+    console.error(`HTTP webserver running on port ${this.config.port}`);
+    console.error(
+      `\nGo here to generate an authorization code:\nhttps://www.reddit.com/api/v1/authorize?client_id=${
         this.config.clientId
       }&response_type=code&state=${this.state}&redirect_uri=${
         this.config.oauthCallback
@@ -111,11 +111,13 @@ export class Reddit {
       const httpConn = Deno.serveHttp(conn);
       for await (const requestEvent of httpConn) {
         // It's ok that the handler is blocking because there should only be one request
-        const params = new URLSearchParams(requestEvent.request.url);
+        const url = new URL(requestEvent.request.url);
+        const params = new URLSearchParams(url.search);
+        const state = params.get("state");
 
-        if (this.state === params.get("state")) {
+        if (this.state !== state) {
           await requestEvent.respondWith(
-            new Response("FAILURE: State does not match", {
+            new Response(`FAILURE: state does not match: ${this.state}`, {
               status: 400,
             })
           );
@@ -149,7 +151,7 @@ export class Reddit {
     throw new Error("Failed to get code");
   }
 
-  async newToken() {
+  public async newAuthorization() {
     const code = await this.oauthServer();
 
     const body = new FormData();
@@ -159,14 +161,14 @@ export class Reddit {
     await this.getAccessToken(body);
   }
 
-  async refresh() {
+  public async refresh() {
     const body = new FormData();
     body.append("grant_type", "refresh_token");
     body.append("refresh_token", this.config.refreshToken!);
     await this.getAccessToken(body);
   }
 
-  async getAccessToken(body: FormData) {
+  private async getAccessToken(body: FormData) {
     const resp = await fetch(`https://www.reddit.com/api/v1/access_token`, {
       method: "POST",
       headers: this.authorization,
@@ -195,7 +197,7 @@ export class Reddit {
     await Deno.writeTextFile(this.configPath, JSON.stringify(this.config));
   }
 
-  async request(url: string, opts?: RequestInit) {
+  public async request(url: string, opts?: RequestInit) {
     const req = async () => {
       if (!this.config.accessToken) {
         await this.refresh();
