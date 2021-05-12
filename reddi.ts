@@ -2,6 +2,7 @@ import { Random } from "https://cdn.deno.land/random/versions/v1.1.2/raw/Random.
 import * as path from "https://deno.land/std/path/mod.ts";
 import xdg from "https://deno.land/x/xdg/src/mod.deno.ts";
 import { ensureFile } from "https://deno.land/std@0.96.0/fs/mod.ts";
+import { compareVersions } from "https://cdn.deno.land/compare_versions/versions/0.4.0/raw/mod.ts";
 
 const REDDI_APP_CLIENT_ID = "f9DcUNPm6x0nag";
 
@@ -45,6 +46,11 @@ export class Reddit {
   authorization!: { Authorization: string };
 
   constructor(configPath?: string) {
+    if (compareVersions(Deno.version.deno, "1.9.1") < 0) {
+      throw new Error(
+        "reddi requires Deno >= 1.9.1 because of https://github.com/denoland/deno/issues/10182"
+      );
+    }
     this.state = new Random().string(30);
 
     // @ts-ignore async constructor
