@@ -1,11 +1,9 @@
-//
-
 import { Random } from "https://cdn.deno.land/random/versions/v1.1.2/raw/Random.js";
+import * as path from "https://deno.land/std/path/mod.ts";
+import xdg from "https://deno.land/x/xdg/src/mod.deno.ts";
+import { ensureFile } from "https://deno.land/std@0.96.0/fs/mod.ts";
 
-const PORT = Deno.env.get("REDDI_PORT") || "16661";
-const OAUTH_CALLBACK =
-  Deno.env.get("REDDI_OAUTH_CALLBACK") || `http://localhost:${PORT}`;
-const CLIENT_ID = Deno.env.get("REDDI_CLIENT_ID") || "f9DcUNPm6x0nag";
+const REDDI_APP_CLIENT_ID = "f9DcUNPm6x0nag";
 
 const scopes = [
   "identity",
@@ -30,53 +28,83 @@ const scopes = [
   "wikiread",
 ];
 
-const authorization = {
-  Authorization: "Basic " + btoa(CLIENT_ID + ":"),
-};
+interface Config {
+  // @ts-ignore match store request format
+  accessToken?: string;
+  refreshToken?: string;
+  port: string;
+  clientId: string;
+  oauthCallback: string;
+}
 
 export class Reddit {
-  accessToken!: string;
-  refreshToken!: string;
+  config!: Config;
+  configPath!: string;
   state: string;
   code: string | null | undefined;
+  authorization!: { Authorization: string };
 
-  constructor() {
+  constructor(configPath?: string) {
     this.state = new Random().string(30);
 
     // @ts-ignore async constructor
     return (async () => {
-      await this.auth();
+      this.configPath =
+        configPath ||
+        Deno.env.get("REDDI_CONFIG") ||
+        path.join(xdg.data(), "reddi", "config.json");
+
+      let config: Partial<Config> = {};
+      try {
+        const json = await Deno.readTextFile(this.configPath);
+        config = JSON.parse(json);
+      } catch {
+        // do nothing
+      }
+
+      const accessToken = config.accessToken;
+      const refreshToken = config.refreshToken;
+      const clientId =
+        config.clientId ||
+        Deno.env.get("REDDI_CLIENT_ID") ||
+        REDDI_APP_CLIENT_ID;
+
+      this.authorization = {
+        Authorization: "Basic " + btoa(clientId + ":"),
+      };
+
+      const port = config.port || Deno.env.get("REDDI_OAUTH_PORT") || "16661";
+      const oauthCallback =
+        config.oauthCallback ||
+        Deno.env.get("REDDI_OAUTH_CALLBACK") ||
+        `http://localhost:${port}`;
+
+      this.config = {
+        accessToken,
+        refreshToken,
+        port,
+        clientId,
+        oauthCallback,
+      };
+
+      if (!this.config.refreshToken || !this.config.accessToken) {
+        await this.newToken();
+      }
 
       return this;
     })();
   }
 
-  async auth() {
-    let access;
-    try {
-      const json = await Deno.readTextFile("./access.json");
-      access = JSON.parse(json);
-      this.accessToken = access.access_token;
-      this.refreshToken = access.refresh_token;
-    } catch {
-      // do nothing
-    }
-
-    if (!this.accessToken || !this.refreshToken) {
-      await this.newToken();
-    }
-  }
-
   async oauthServer(): Promise<string> {
-    console.log(`HTTP webserver running on port ${PORT}`);
+    console.log(`HTTP webserver running on port ${this.config.port}`);
     console.log(
-      `\n\nGo here to generate an access token:\nhttps://www.reddit.com/api/v1/authorize?client_id=${CLIENT_ID}&response_type=code&state=${
-        this.state
-      }&redirect_uri=${OAUTH_CALLBACK}&duration=permanent&scope=${scopes.join(
-        ","
-      )}`
+      `\nGo here to generate an access token:\nhttps://www.reddit.com/api/v1/authorize?client_id=${
+        this.config.clientId
+      }&response_type=code&state=${this.state}&redirect_uri=${
+        this.config.oauthCallback
+      }&duration=permanent&scope=${scopes.join(",")}`
     );
-    const server = Deno.listen({ port: Number(PORT) });
+    const server = Deno.listen({ port: Number(this.config.port) });
 
     // Connections to the server will be yielded up as an async iterable.
     for await (const conn of server) {
@@ -86,20 +114,27 @@ export class Reddit {
         const params = new URLSearchParams(requestEvent.request.url);
 
         if (this.state === params.get("state")) {
-          new Response("FAILURE: State does not match", {
-            status: 400,
-          });
+          await requestEvent.respondWith(
+            new Response("FAILURE: State does not match", {
+              status: 400,
+            })
+          );
           throw new Error("State does not match!");
         }
 
         const code = params.get("code");
         if (code) {
+          await requestEvent.respondWith(
+            new Response("You can continue using reddi", {
+              status: 200,
+            })
+          );
           return code;
         }
 
         const error = params.get("error");
 
-        requestEvent.respondWith(
+        await requestEvent.respondWith(
           new Response(
             `FAILURE: Failed to get code\nError from Reddit: ${error}`,
             {
@@ -120,21 +155,21 @@ export class Reddit {
     const body = new FormData();
     body.append("grant_type", "authorization_code");
     body.append("code", code);
-    body.append("redirect_uri", OAUTH_CALLBACK);
+    body.append("redirect_uri", this.config.oauthCallback);
     await this.getAccessToken(body);
   }
 
   async refresh() {
     const body = new FormData();
     body.append("grant_type", "refresh_token");
-    body.append("refresh_token", this.refreshToken);
+    body.append("refresh_token", this.config.refreshToken!);
     await this.getAccessToken(body);
   }
 
   async getAccessToken(body: FormData) {
     const resp = await fetch(`https://www.reddit.com/api/v1/access_token`, {
       method: "POST",
-      headers: authorization,
+      headers: this.authorization,
       body,
     });
 
@@ -142,30 +177,34 @@ export class Reddit {
     const accessToken = respBody.access_token;
     if (!accessToken) {
       throw new Error(
-        `no access_token in response: ${JSON.stringify(respBody)}`
+        `No access_token in response: ${JSON.stringify(respBody)}`
       );
     }
 
     const refreshToken = respBody.refresh_token;
     if (!refreshToken) {
       throw new Error(
-        `no refresh_token in response: ${JSON.stringify(respBody)}`
+        `No refresh_token in response: ${JSON.stringify(respBody)}`
       );
     }
 
-    await Deno.writeTextFile("./access.json", JSON.stringify(respBody));
+    this.config.accessToken = accessToken;
+    this.config.refreshToken = refreshToken;
 
-    this.accessToken = accessToken;
-    this.refreshToken = refreshToken;
+    await ensureFile(this.configPath);
+    await Deno.writeTextFile(this.configPath, JSON.stringify(this.config));
   }
 
   async request(url: string, opts?: RequestInit) {
-    const req = () => {
+    const req = async () => {
+      if (!this.config.accessToken) {
+        await this.refresh();
+      }
       return fetch(`https://oauth.reddit.com${url}`, {
         ...opts,
         headers: {
           ...opts?.headers,
-          Authorization: `Bearer ${this.accessToken}`,
+          Authorization: `Bearer ${this.config.accessToken!}`,
         },
       });
     };
