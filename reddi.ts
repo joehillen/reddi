@@ -218,16 +218,15 @@ export class Reddit {
     };
 
     let resp = await req();
-    if (resp.status === 403) {
+    if ([403, 401].includes(resp.status)) {
       await this.refresh();
       resp = await req();
+    }
 
-      if (resp.status === 403) {
-        console.error(
-          `Reddit request failed: ${JSON.stringify(resp)} ${await resp.text()}`
-        );
-        Deno.exit(1);
-      }
+    if (!resp.ok) {
+      console.error(resp.status, resp.statusText);
+      console.debug(await resp.text());
+      throw new Error("request failed");
     }
 
     return resp.json();
