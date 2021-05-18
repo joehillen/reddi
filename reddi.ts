@@ -1,8 +1,8 @@
 import { Random } from "https://cdn.deno.land/random/versions/v1.1.2/raw/Random.js";
 import * as path from "https://deno.land/std/path/mod.ts";
 import xdg from "https://deno.land/x/xdg/src/mod.deno.ts";
-import { ensureFile } from "https://deno.land/std@0.96.0/fs/mod.ts";
-import { compareVersions } from "https://cdn.deno.land/compare_versions/versions/0.4.0/raw/mod.ts";
+import { ensureFile } from "https://deno.land/std/fs/mod.ts";
+import { compareVersions } from "https://deno.land/x/compare_versions@0.4.0/mod.ts";
 
 const REDDI_APP_CLIENT_ID = "f9DcUNPm6x0nag";
 
@@ -94,6 +94,7 @@ export class Reddit {
       };
 
       if (!this.config.refreshToken || !this.config.accessToken) {
+        console.error(`access_token or refresh_token not found in '${this.configPath}'. You'll need to re-authorize the reddi app with your Reddit account to generate a new authorization code.`)
         await this.newAuthorization();
       }
 
@@ -144,7 +145,7 @@ export class Reddit {
 
         await requestEvent.respondWith(
           new Response(
-            `FAILURE: Failed to get code\nError from Reddit: ${error}`,
+            `FAILURE: Failed to get authorization code\nError from Reddit: ${error}`,
             {
               status: 500,
             }
@@ -154,7 +155,7 @@ export class Reddit {
       }
     }
 
-    throw new Error("Failed to get code");
+    throw new Error("Failed to get authorization code");
   }
 
   public async newAuthorization() {
