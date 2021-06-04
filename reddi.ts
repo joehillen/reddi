@@ -94,7 +94,9 @@ export class Reddit {
       };
 
       if (!this.config.refreshToken || !this.config.accessToken) {
-        console.error(`access_token or refresh_token not found in '${this.configPath}'. You'll need to re-authorize the reddi app with your Reddit account to generate a new authorization code.`)
+        console.error(
+          `access_token or refresh_token not found in '${this.configPath}'. You'll need to re-authorize the reddi app with your Reddit account to generate a new authorization code.`
+        );
         await this.newAuthorization();
       }
 
@@ -209,7 +211,7 @@ export class Reddit {
       if (!this.config.accessToken) {
         await this.refresh();
       }
-      return fetch(`https://oauth.reddit.com${url}`, {
+      return fetch(new URL(url, "https://oauth.reddit.com"), {
         ...opts,
         headers: {
           ...opts?.headers,
@@ -225,12 +227,28 @@ export class Reddit {
     }
 
     if (!resp.ok) {
-      console.error(resp.status, resp.statusText);
+      console.error(url, resp.status, resp.statusText);
       console.debug(await resp.text());
       throw new Error("request failed");
     }
 
     return resp.json();
+  }
+
+  private bodyToString(body: any) {
+    const params = new URLSearchParams();
+    Object.entries(body).forEach(([k, v]) => params.set(k, String(v)));
+    return params.toString();
+  }
+
+  public get(api: string, body: { [key: string]: any }) {
+    return this.request(`${api}?${this.bodyToString(body)}`);
+  }
+
+  public post(api: string, body: { [key: string]: any }) {
+    return this.request(`${api}?${this.bodyToString(body)}`, {
+      method: "POST",
+    });
   }
 }
 
