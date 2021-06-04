@@ -241,12 +241,20 @@ export class Reddit {
     return params.toString();
   }
 
-  public get(api: string, body: { [key: string]: any }) {
-    return this.request(`${api}?${this.bodyToString(body)}`);
+  public get(api: string, body?: { [key: string]: any }) {
+    let url = api;
+    if (body) {
+      url += `?${this.bodyToString(body)}`;
+    }
+    return this.request(url);
   }
 
-  public post(api: string, body: { [key: string]: any }) {
-    return this.request(`${api}?${this.bodyToString(body)}`, {
+  public post(api: string, body?: { [key: string]: any }) {
+    let url = api;
+    if (body) {
+      url += `?${this.bodyToString(body)}`;
+    }
+    return this.request(url, {
       method: "POST",
     });
   }
